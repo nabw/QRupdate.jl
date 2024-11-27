@@ -133,7 +133,7 @@ R = [0  0  0    R = [r11  0  0    R = [r11  r12  0
      0  0  0]          0  0  0]          0    0  0]
 """
 #function qraddcol!(A::AT, R::RT, a::aT, N::Int64, work::wT, work2::w2T, u::uT, z::zT, r::rT) where {AT,RT,aT,wT,w2T,uT,zT,rT,T}
-function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector{T}, N::Int64, work::AbstractVector{T}, work2::AbstractVector{T}, u::AbstractVector{T}, z::AbstractVector{T}, r::AbstractVector{T}) where {T}
+function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector{T}, N::Int64, work::AbstractVector{T}, work2::AbstractVector{T}, u::AbstractVector{T}, z::AbstractVector{T}, r::AbstractVector{T}; updateMat::Bool=true) where {T}
     #c,u,z,du,dz are R^n. Only r is R^m
     #c -> work; du -> work2. dz is redundant
 
@@ -170,7 +170,7 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
     if N == 0
         anorm  = sqrt(anorm2)
         R[1,1] = anorm
-        view(A,:,N+1) .= a
+        updateMat && view(A,:,N+1) .= a
         return
     end
     #end #timeit norms
@@ -222,7 +222,7 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
     axpy!(1, work2_tr, u_tr)
     view(R,1:N,N+1) .= view(u, 1:N)
     R[N+1,N+1] = γ
-    view(A,:,N+1) .= a
+    updateMat && view(A,:,N+1) .= a
 end
 
 """
