@@ -8,15 +8,16 @@ function swapcols!(M::Matrix{T},i::Int,j::Int) where {T}
     Base.permutecols!!(M, replace(axes(M,2), i=>j, j=>i))
 end
 
-ORTHO_TOL = 1e-6 # err = |unew|^2 / |uold|^2 < ORTHO_TOL
-ORTHO_MAX_IT = 1
+ORTHO_TOL = 1e-14 # err = |unew|^2 / |uold|^2 < ORTHO_TOL
+ORTHO_MAX_IT = 10
+CSNE_MAX_IT = 10
 verbose = true
 
 """
 Auxiliary function used to solve fully allocated but incomplete R matrices.
 See documentation of qraddcol! . 
 """
-function solveR!(R::matT, b::vecT, sol::vecT, realSize::Int64) where {matT, vecT}
+function solveR!(R::matT, b::vecT, sol::vecSol, realSize::Int64) where {matT, vecT, vecSol}
     # Note: R is upper triangular
     @inbounds sol[realSize] = b[realSize] / R[realSize, realSize]
     for i in (realSize-1):-1:1
@@ -32,7 +33,7 @@ end
 Auxiliary function used to solve transpose of fully allocated but incomplete R matrices.
 See documentation of qraddcol! . 
 """
-function solveRT!(R::matT, b::vecT, sol::vecT, realSize::Int64) where {matT, vecT}
+function solveRT!(R::matT, b::vecT, sol::vecSol, realSize::Int64) where {matT, vecT, vecSol}
     # Note: R is upper triangular
     @inbounds sol[1] = b[1] / R[1, 1]
     for i in 2:realSize
@@ -185,26 +186,26 @@ function qraddcol!(A::AT, R::RT, a::aT, N::Int64, work::wT, work2::w2T, u::uT, z
         return
     end
     #end #timeit norms
+    
 
-    # work := c = A'a
-    mul!(work_tr, Atr', a)
-    solveRT!(R, work, u, N) #u = R'\c = R'\work
+    mul!(work_tr, Atr', a) # work := c = A'a
+    solveRT!(R, work_tr, u_tr, N) #u = R'\c = R'\work
     #@timeit "norms 2" begin
-    unorm2 = u'u
+    unorm2 = u_tr'u_tr
     unorm2_prev = anorm2
     #end #timeit norms 2
 
-    solveR!(R, u, z, N) #z = R\u  
+    solveR!(R, u_tr, z_tr, N) #z = R\u  
     copy!(r, a)
     mul!(r, Atr, z_tr, -1, 1) #r = a - A*z
     γ = norm(r)
-    mul!(work_tr, Atr', r) # r := c = A'r
+    mul!(work_tr, Atr', r) # work := c = A'r
     err = sqrt(work_tr'work_tr / anorm2)
 
 
     # Iterative refinement
     if err < ORTHO_TOL
-        view(R,1:N,N+1) .= view(u, 1:N)
+        view(R,1:N,N+1) .= u_tr
         R[N+1,N+1] = γ
         view(A,:,N+1) .= a
         return 
@@ -215,20 +216,18 @@ function qraddcol!(A::AT, R::RT, a::aT, N::Int64, work::wT, work2::w2T, u::uT, z
         #if β != 0
             #axpy!(-β2, z, work) #c = c - β2*z
         #end
-        solveRT!(R, work, work2, N) # work2 := du = R'\c
-        solveR!(R, work2, work, N) # work := dz = R\du
+        solveRT!(R, work_tr, work2_tr, N) # work2 := du = R'\c
+        axpy!(1.0, work2_tr, u_tr) # Refine u
+        solveR!(R, work2_tr, work_tr, N) # work := dz = R\du
         axpy!(1.0, work_tr, z_tr) #z  += dz          # Refine z
         #@timeit "residual 2" begin
 
         copy!(r, a)
         mul!(r, Atr, z_tr, -1.0, 1.0) #r = a - A*z
         γ = norm(r)
-        work .= 0.0
         mul!(work_tr, Atr', r) # work := c = A'r
 
         err = sqrt(work_tr'work_tr / anorm2)
-        #verbose && println(" *** Reorthogonalize ",string(i)," . Error:", err)
-        verbose && print("*")
         i += 1
 
 
@@ -238,8 +237,10 @@ function qraddcol!(A::AT, R::RT, a::aT, N::Int64, work::wT, work2::w2T, u::uT, z
     end # while
     end # if
 
+    verbose && println("      *** $(i) reorthogonalization steps. Error:", err)
+
     axpy!(1, work2_tr, u_tr)
-    view(R,1:N,N+1) .= view(u, 1:N)
+    view(R,1:N,N+1) .= u_tr
     R[N+1,N+1] = γ
     view(A,:,N+1) .= a
 end
@@ -423,10 +424,10 @@ function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::
     err = sqrt(work_tr'work_tr / bnorm2)
 
     i = 0
-    while err > ORTHO_TOL && i < ORTHO_MAX_IT
+    while err > ORTHO_TOL && i < CSNE_MAX_IT
 
-        solveRT!(R, work, work2, N) # work2 := du = R'\c
-        solveR!(R, work2, work, N) # work := dz = R\du
+        solveRT!(R, work_tr, work2_tr, N) # work2 := du = R'\c
+        solveR!(R, work2_tr, work_tr, N) # work := dz = R\du
         axpy!(1.0, work_tr, sol_tr) #z  += dz          # Refine z
 
         copy!(r, b)
@@ -434,11 +435,11 @@ function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::
         mul!(work_tr, Atr', r) # work := c = A'r
 
         err = sqrt(work_tr'work_tr / bnorm2)
-        #verbose && println(" *** Reorthogonalize ",string(i), " CSNE. Error:", err)
-        verbose && print("*")
         i += 1
 
     end
+
+    verbose && println("      *** $(i) CSNE reorthogonalization steps. Error:", err)
 end
 
 
