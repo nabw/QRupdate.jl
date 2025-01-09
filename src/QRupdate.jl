@@ -188,35 +188,33 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
     err = norm(work_tr) / sqrt(anorm2)
 
     # Iterative refinement
+    i = 0
     if err < ORTHO_TOL
         view(R,1:N,N+1) .= u_tr
         R[N+1,N+1] = γ
         view(A,:,N+1) .= a
-        return 
     else
+        while err > ORTHO_TOL && i < ORTHO_MAX_IT
 
-    i = 0
-    while err > ORTHO_TOL && i < ORTHO_MAX_IT
+            solveRT!(Rtr, work_tr, work2_tr) # work2 := du = R'\c
+            axpy!(1.0, work2_tr, u_tr) # Refine u
+            solveR!(Rtr, work2_tr, work_tr) # work := dz = R\du
+            axpy!(1.0, work_tr, z_tr) #z  += dz          # Refine z
+            #@timeit "residual 2" begin
 
-        solveRT!(Rtr, work_tr, work2_tr) # work2 := du = R'\c
-        axpy!(1.0, work2_tr, u_tr) # Refine u
-        solveR!(Rtr, work2_tr, work_tr) # work := dz = R\du
-        axpy!(1.0, work_tr, z_tr) #z  += dz          # Refine z
-        #@timeit "residual 2" begin
+            copy!(r, a)
+            mul!(r, Atr, z_tr, -1.0, 1.0) #r = a - A*z
+            γ = norm(r)
+            mul!(work_tr, Atr', r) # work := c = A'r
 
-        copy!(r, a)
-        mul!(r, Atr, z_tr, -1.0, 1.0) #r = a - A*z
-        γ = norm(r)
-        mul!(work_tr, Atr', r) # work := c = A'r
-
-        err = norm(work_tr) / sqrt(anorm2)
-        i += 1
+            err = norm(work_tr) / sqrt(anorm2)
+            i += 1
 
 
-        #if !iszero(β)
-            #γ = sqrt(γ^2 + β2*norm(z)^2 + β2)
-        #end
-    end # while
+            #if !iszero(β)
+                #γ = sqrt(γ^2 + β2*norm(z)^2 + β2)
+            #end
+        end # while
     end # if
 
     verbose && println("      *** $(i) reorthogonalization steps. Error:", err)
