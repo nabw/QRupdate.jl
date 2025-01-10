@@ -9,8 +9,8 @@ function swapcols!(M::Matrix{T},i::Int,j::Int) where {T}
 end
 
 ORTHO_TOL = 1e-14 # err = |unew|^2 / |uold|^2 < ORTHO_TOL
-ORTHO_MAX_IT = 10
-CSNE_MAX_IT = 10
+ORTHO_MAX_IT = 1
+CSNE_MAX_IT = 1
 verbose = true
 
 """
@@ -133,7 +133,6 @@ R = [0  0  0    R = [r11  0  0    R = [r11  r12  0
      0  0  0           0  0  0           0  r22  0
      0  0  0]          0  0  0]          0    0  0]
 """
-#function qraddcol!(A::AT, R::RT, a::aT, N::Int64, work::wT, work2::w2T, u::uT, z::zT, r::rT) where {AT,RT,aT,wT,w2T,uT,zT,rT,T}
 function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector{T}, N::Int64, work::AbstractVector{T}, work2::AbstractVector{T}, u::AbstractVector{T}, z::AbstractVector{T}, r::AbstractVector{T}; updateMat::Bool=true) where {T}
     #c,u,z,du,dz are R^n. Only r is R^m
     #c -> work; du -> work2. dz is redundant
@@ -169,6 +168,7 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
     anorm2 = anorm^2
 
     if N == 0
+        # First iteration is simpler
         anorm  = sqrt(anorm2)
         R[1,1] = anorm
         updateMat && view(A,:,N+1) .= a
@@ -192,7 +192,7 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
     if err < ORTHO_TOL
         view(R,1:N,N+1) .= u_tr
         R[N+1,N+1] = γ
-        view(A,:,N+1) .= a
+        updateMat && view(A,:,N+1) .= a
     else
         while err > ORTHO_TOL && i < ORTHO_MAX_IT
 
@@ -215,14 +215,15 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
                 #γ = sqrt(γ^2 + β2*norm(z)^2 + β2)
             #end
         end # while
+        verbose && println("      *** $(i) reorthogonalization steps. Error:", err)
+
+        axpy!(1, work2_tr, u_tr)
+        view(R,1:N,N+1) .= u_tr
+        R[N+1,N+1] = γ
+        updateMat && view(A,:,N+1) .= a
     end # if
 
-    verbose && println("      *** $(i) reorthogonalization steps. Error:", err)
 
-    axpy!(1, work2_tr, u_tr)
-    view(R,1:N,N+1) .= u_tr
-    R[N+1,N+1] = γ
-    updateMat && view(A,:,N+1) .= a
 end
 
 """
@@ -412,7 +413,7 @@ function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::
 
     end
 
-    verbose && println("      *** $(i) CSNE reorthogonalization steps. Error:", err)
+    i > 0 && verbose && println("      *** $(i) CSNE reorthogonalization steps. Error:", err)
 end
 
 end # module
