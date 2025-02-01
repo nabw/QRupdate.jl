@@ -1,6 +1,7 @@
 module QRupdate
 
-using LinearAlgebra
+using LinearAlgebra, TimerOutputs
+to = TimerOutput()
 
 export qraddcol, qraddcol!, qraddrow, qrdelcol, qrdelcol!, csne, csne!
 
@@ -145,6 +146,7 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
     @assert size(z,1) == n
     @assert size(r,1) == m
 
+    @timeit to "Extract views" begin
     if N < n
         cols = 1:N
         Atr = view(A, :, cols) #truncated
@@ -161,12 +163,12 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
         u_tr = u
         z_tr = z
     end
-    #end #timeit get views
+    end # Extract views"
 
-    #@timeit "norms" begin
     anorm = norm(a)
     anorm2 = anorm^2
 
+    @timeit to "Base case" begin
     if N == 0
         # First iteration is simpler
         anorm  = sqrt(anorm2)
@@ -174,27 +176,31 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
         updateMat && view(A,:,N+1) .= a
         return
     end
-    #end #timeit norms
+    end #timeit Base case
     
 
     # work := c = A'a
-    mul!(work_tr, Atr', a)
-    solveRT!(Rtr, work_tr, u_tr) #u = R'\c = R'\work
-    solveR!(Rtr, u_tr, z_tr) #z = R\u  
-    copy!(r, a)
-    mul!(r, Atr, z_tr, -1, 1) #r = a - A*z
+    @timeit to "Default iteration" begin
+    @timeit to "A'a" mul!(work_tr, Atr', a)
+    @timeit to "solveRT" solveRT!(Rtr, work_tr, u_tr) #u = R'\c = R'\work
+    @timeit to "solveR" solveR!(Rtr, u_tr, z_tr) #z = R\u  
+    @timeit to "copy" copy!(r, a)
+    @timeit to "mul!" mul!(r, Atr, z_tr, -1, 1) #r = a - A*z
     γ = norm(r)
-    mul!(work_tr, Atr', r) # r := c = A'r
+    @timeit to "mul: c=A'r" mul!(work_tr, Atr', r) # r := c = A'r
     err = norm(work_tr) / sqrt(anorm2)
+    end # timeit Default iteration
 
     # Iterative refinement
     i = 0
     if err < ORTHO_TOL
+        @timeit to "No refinement update" begin
         view(R,1:N,N+1) .= u_tr
         R[N+1,N+1] = γ
         updateMat && view(A,:,N+1) .= a
+        end # timeit No refinement
     else
-        while err > ORTHO_TOL && i < ORTHO_MAX_IT
+        @timeit "Reorthogonalize" while err > ORTHO_TOL && i < ORTHO_MAX_IT
 
             solveRT!(Rtr, work_tr, work2_tr) # work2 := du = R'\c
             axpy!(1.0, work2_tr, u_tr) # Refine u
@@ -217,10 +223,10 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
         end # while
         verbose && println("      *** $(i) reorthogonalization steps. Error:", err)
 
-        axpy!(1, work2_tr, u_tr)
-        view(R,1:N,N+1) .= u_tr
-        R[N+1,N+1] = γ
-        updateMat && view(A,:,N+1) .= a
+        @timeit to axpy!(1, work2_tr, u_tr)
+        @timeit to "Update R" view(R,1:N,N+1) .= u_tr
+        @timeit to "Update R" R[N+1,N+1] = γ
+        @timeit "Update A" updateMat && view(A,:,N+1) .= a
     end # if
 
 
