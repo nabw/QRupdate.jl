@@ -128,7 +128,7 @@ R = [0  0  0    R = [r11  0  0    R = [r11  r12  0
      0  0  0           0  0  0           0  r22  0
      0  0  0]          0  0  0]          0    0  0]
 """
-function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector{T}, N::Int64, work::AbstractVector{T}, work2::AbstractVector{T}, u::AbstractVector{T}, z::AbstractVector{T}, r::AbstractVector{T}; updateMat::Bool=true, log::Bool=false, ortho_tol::Float64=1e-14, ortho_max_it::Int=1) where {T}
+function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector{T}, N::Int64, work::AbstractVector{T}, work2::AbstractVector{T}, u::AbstractVector{T}, z::AbstractVector{T}, r::AbstractVector{T}; updateMat::Bool=true, verbose::Bool=false, log::Bool=false, ortho_tol::Float64=1e-14, ortho_max_it::Int=1) where {T}
     #c,u,z,du,dz are R^n. Only r is R^m
     #c -> work; du -> work2. dz is redundant
 
@@ -350,7 +350,7 @@ function csne(Rin::AbstractMatrix{T}, A::AbstractMatrix{T}, b::Vector{T}) where 
     return (x, r)
 end
 
-function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::rT, N::Int; log::Bool=false, ortho_tol::Float64=1e-14, ortho_max_it::Int=1) where {RT,AT,bT,solT,wT,w2T,uT,rT}
+function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::rT, N::Int; verbose::Bool=false, log::Bool=false, ortho_tol::Float64=1e-14, ortho_max_it::Int=1) where {RT,AT,bT,solT,wT,w2T,uT,rT}
     #c,u,sol,du are R^n. Only r is R^m
     #c -> work; du -> work2. dsol is redundant.
 
