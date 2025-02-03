@@ -167,7 +167,7 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
         anorm  = sqrt(anorm2)
         R[1,1] = anorm
         updateMat && view(A,:,N+1) .= a
-        return
+        return 0
     end
     end #timeit Base case
     
