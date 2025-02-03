@@ -9,10 +9,6 @@ function swapcols!(M::Matrix{T},i::Int,j::Int) where {T}
     Base.permutecols!!(M, replace(axes(M,2), i=>j, j=>i))
 end
 
-ORTHO_TOL = 1e-14 # err = |unew|^2 / |uold|^2 < ORTHO_TOL
-ORTHO_MAX_IT = 1
-CSNE_MAX_IT = 1
-verbose = true
 
 """
 Triangular solve `Rx = b`, where `R` is upper triangular of size `realSize x realSize`. The storage of `R` is described in the documentation for `qraddcol!`.
@@ -25,8 +21,7 @@ function solveR!(R::AbstractMatrix{T}, b::AbstractVector{T}, sol::AbstractVector
     # provide a view only, so they do not incur in further memory allocations. I 
     # verified this with BenchmarkTooks. 
     # N Barnafi 06/11/24 
-    sol .= b
-    ldiv!(UpperTriangular(R), sol)
+    ldiv!(sol, UpperTriangular(R), b)
 end
 
 """
@@ -35,8 +30,7 @@ Triangular solve `R'x = b`, where `R` is upper triangular of size `realSize x re
 function solveRT!(R::AbstractMatrix{T}, b::AbstractVector{T}, sol::AbstractVector{T}) where {T}
     # Note: R is upper triangular.
     # Note 2: We solve for the conjugate transpose.
-    sol .= b
-    ldiv!(LowerTriangular(R'), sol)
+    ldiv!(sol, LowerTriangular(R'), b)
 end
 
 
@@ -134,11 +128,10 @@ R = [0  0  0    R = [r11  0  0    R = [r11  r12  0
      0  0  0           0  0  0           0  r22  0
      0  0  0]          0  0  0]          0    0  0]
 """
-function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector{T}, N::Int64, work::AbstractVector{T}, work2::AbstractVector{T}, u::AbstractVector{T}, z::AbstractVector{T}, r::AbstractVector{T}; updateMat::Bool=true) where {T}
+function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector{T}, N::Int64, work::AbstractVector{T}, work2::AbstractVector{T}, u::AbstractVector{T}, z::AbstractVector{T}, r::AbstractVector{T}; updateMat::Bool=true, log::Bool=false, ortho_tol::Float64=1e-14, ortho_max_it::Int=1) where {T}
     #c,u,z,du,dz are R^n. Only r is R^m
     #c -> work; du -> work2. dz is redundant
 
-    #@timeit "get views" begin
     m, n = size(A)
     @assert size(work,1) == n "Expected "*string(n)*", actual size: " * string(size(work))
     @assert size(work2,1) == n
@@ -193,20 +186,19 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
 
     # Iterative refinement
     i = 0
-    if err < ORTHO_TOL
+    if err < ortho_tol
         @timeit to "No refinement update" begin
         view(R,1:N,N+1) .= u_tr
         R[N+1,N+1] = γ
         updateMat && view(A,:,N+1) .= a
         end # timeit No refinement
     else
-        @timeit "Reorthogonalize" while err > ORTHO_TOL && i < ORTHO_MAX_IT
+        @timeit "Reorthogonalize" while err > ortho_tol && i < ortho_max_it
 
             solveRT!(Rtr, work_tr, work2_tr) # work2 := du = R'\c
             axpy!(1.0, work2_tr, u_tr) # Refine u
             solveR!(Rtr, work2_tr, work_tr) # work := dz = R\du
             axpy!(1.0, work_tr, z_tr) #z  += dz          # Refine z
-            #@timeit "residual 2" begin
 
             copy!(r, a)
             mul!(r, Atr, z_tr, -1.0, 1.0) #r = a - A*z
@@ -215,11 +207,6 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
 
             err = norm(work_tr) / sqrt(anorm2)
             i += 1
-
-
-            #if !iszero(β)
-                #γ = sqrt(γ^2 + β2*norm(z)^2 + β2)
-            #end
         end # while
         verbose && println("      *** $(i) reorthogonalization steps. Error:", err)
 
@@ -227,9 +214,9 @@ function qraddcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, a::AbstractVector
         @timeit to "Update R" view(R,1:N,N+1) .= u_tr
         @timeit to "Update R" R[N+1,N+1] = γ
         @timeit "Update A" updateMat && view(A,:,N+1) .= a
+        log && return i
     end # if
-
-
+    return 0
 end
 
 """
@@ -330,8 +317,6 @@ function qrdelcol!(A::AbstractMatrix{T}, R::AbstractMatrix{T}, k::Integer) where
         end
         R[j+1,j] = zero(T)
     end
-    #end # timeit shift row
-    #end #timeit all
 end
 
 """
@@ -365,7 +350,7 @@ function csne(Rin::AbstractMatrix{T}, A::AbstractMatrix{T}, b::Vector{T}) where 
     return (x, r)
 end
 
-function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::rT, N::Int) where {RT,AT,bT,solT,wT,w2T,uT,rT}
+function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::rT, N::Int; log::Bool=false, ortho_tol::Float64=1e-14, ortho_max_it::Int=1) where {RT,AT,bT,solT,wT,w2T,uT,rT}
     #c,u,sol,du are R^n. Only r is R^m
     #c -> work; du -> work2. dsol is redundant.
 
@@ -404,7 +389,7 @@ function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::
     err = norm(work_tr) / bnorm
 
     i = 0
-    while err > ORTHO_TOL && i < CSNE_MAX_IT
+    while err > ortho_tol && i < ortho_max_it
 
         solveRT!(Rtr, work_tr, work2_tr) # work2 := du = R'\c
         solveR!(Rtr, work2_tr, work_tr) # work := dz = R\du
@@ -420,6 +405,7 @@ function csne!(R::RT, A::AT, b::bT, sol::solT, work::wT, work2::w2T, u::uT,  r::
     end
 
     i > 0 && verbose && println("      *** $(i) CSNE reorthogonalization steps. Error:", err)
+    log && return i
 end
 
 end # module
